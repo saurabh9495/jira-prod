@@ -1,0 +1,134 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    app: jira
+  name: jira-cloud
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: jira
+      name: jira
+    spec:
+      initContainers:
+        - name: unlock-jira1
+          image: busybox
+          command: ["chown"]
+          args: ["-R", "daemon:daemon", "/var/atlassian/jira/"]
+          volumeMounts:
+            - name: "jira-data"
+              mountPath: /var/atlassian/jira
+
+        - name: unlock-jira2
+          image: busybox
+          command: ["chmod"]
+          args: ["-R", "775", "/var/atlassian/jira/"]
+          volumeMounts:
+            - name: "jira-data"
+              mountPath: /var/atlassian/jira
+
+      containers:
+#################### Container Cloud SQL Proxy ################
+        - name: cloudsql-proxy
+          image: gcr.io/cloudsql-docker/gce-proxy:1.11
+          command: ["/cloud_sql_proxy",
+                    "-instances=sample-projects-560029:us-central1:saurabk-jira=tcp:3306",
+                    "-credential_file=/secrets/cloudsql/credentials.json"]
+
+          volumeMounts:
+            - name: cloudsql-instance-credentials
+              mountPath: /secrets/cloudsql
+              readOnly: true
+
+            - name: ssl-certs
+              mountPath: /etc/ssl/certs
+
+            - name: cloudsql
+              mountPath: /cloudsql
+
+######################## Container JIRA #######################
+        - name: jira
+          image: "cptactionhank/atlassian-jira-software:latest"
+          lifecycle:
+            postStart:
+              exec:
+                command: ["rm", "-f", "/var/atlassian/jira/.jira-home.lock"]
+            preStop:
+              exec:
+                command: ["/opt/atlassian/jira/bin/stop-jira.sh"]
+          ports:
+          - containerPort: 8080
+          - containerPort: 8081
+          - containerPort: 8082
+
+          env:
+            - name: JIRA_HOME
+              value: "/var/atlassian/jira"
+            - name: X_PROXY_NAME
+              value: "saurabh9495.org"
+
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+
+          volumeMounts:
+            - name: "jira-data"
+              mountPath: /var/atlassian/jira
+
+            - name: "jira-server-xml"
+              mountPath: /opt/atlassian/jira/conf/server.xml
+              subPath: server.xml
+
+            - name: "jira-config-properties"
+              mountPath: /var/atlassian/jira/jira-config.properties
+              subPath: jira-config.properties
+
+################## Container NGINX ###################
+        - name: nginx
+          image: nginx
+          ports:
+          - containerPort: 80
+          - containerPort: 443
+
+          volumeMounts:
+            - name: jira-nginx-conf
+              mountPath: /etc/nginx/conf.d
+
+            - name: nginx-tls
+              mountPath: /etc/nginx/cert/
+
+#################################################################
+      volumes:
+        - name: "jira-data"
+          persistentVolumeClaim:
+            claimName: jira-storage-claim
+
+        - name: nginx-tls
+          secret:
+            secretName: tls-secrets
+
+        - name: jira-nginx-conf
+          configMap:
+            name: jira-nginx-conf
+
+        - name: jira-config-properties
+          configMap:
+            name: jira-config-properties
+
+        - name: jira-server-xml
+          configMap:
+            name: server-xml
+
+        - name: cloudsql-instance-credentials
+          secret:
+            secretName: cloudsql-instance-credentials
+
+        - name: cloudsql
+          emptyDir:
+
+        - name: ssl-certs
+          hostPath:
+            path: /etc/ssl/certs
