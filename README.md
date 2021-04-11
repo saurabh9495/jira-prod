@@ -106,3 +106,7 @@ At this point you can visit Jira on http://xxx.xxx.xxx.xxx or https://xxx.xxx.xx
 ## References
 
 Project forked of [Jira on kubernetes](https://github.com/kelseyhightower/jira-on-kubernetes)
+
+
+kubectl create secret generic cloudsql-instance-credentials --from-file=credentials.json=service_account.json 
+kubectl create secret generic cloudsql-db-credentials --from-literal=username=root --from-literal=password=root_password_db
